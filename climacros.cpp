@@ -10,7 +10,6 @@ All expressions should resolve to a string.
 (c) Elias Bachaalany <elias.bachaalany@gmail.com>
 */
 
-#include <stack>
 #include <string>
 #include <algorithm>
 #include <regex>
@@ -54,8 +53,8 @@ static macro_def_t DEFAULT_MACROS[] =
 {
     {"$!",    "${'0x%x' % idc.here()}$",                            "Current cursor location (0x...)"},
     {"$!!",   "${'%x' % idc.here()}$",                              "Current cursor location"},
-    {"$[",    "${'0x%x' % SelStart()}$",                            "Selection start (0x...)"},
-    {"$[[",   "${'%x' % SelStart()}$",                              "Selection start"},
+    {"$[",    "${'0x%x' % idc.SelStart()}$",                        "Selection start (0x...)"},
+    {"$[[",   "${'%x' % idc.SelStart()}$",                          "Selection start"},
     {"$@b",   "${'0x%x' % idc.Byte(idc.here())}$",                  "Byte value at current cursor location (0x...)" },
     {"$@B",   "${'%x' % idc.Byte(idc.here())}$",                    "Byte value at current cursor location"},
     {"$@d",   "${'0x%x' % idc.Dword(idc.here())}$",                 "Dword value at current cursor location (0x...)"},
