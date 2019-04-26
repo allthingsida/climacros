@@ -6,7 +6,7 @@ CLI macros is a productivity tool that lets you define and use static or dynamic
 
 # Usage
 
-When installed, *climacros* is always active. It comes with predetermined set of macros:
+When installed, *climacros* is always active. It comes with a predetermined set of macros:
 
 ![Default macros](docs/_resources/climacros-defaults.png)
 
