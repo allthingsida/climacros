@@ -10,6 +10,7 @@ All expressions should resolve to a string.
 (c) Elias Bachaalany <elias.bachaalany@gmail.com>
 */
 
+#include <type_traits>
 #include <string>
 #include <algorithm>
 #include <regex>
@@ -91,31 +92,22 @@ struct cli_ctx_t
     cli_t new_cli;
 };
 
-#define MAX_CTX 18
+#define MAX_CTX 17
 static cli_ctx_t g_cli_ctx[MAX_CTX] = {};
 
-//-------------------------------------------------------------------------
-// Mechanism to create cli->execute_line() callback with user data
-#define DEF_HOOK(n) execute_line_with_ctx_##n
-#define IMPL_HOOK(n) \
-    static bool idaapi execute_line_with_ctx_##n(const char *line) \
-    { \
-        std::string repl = macro_replacer(line); \
-        return g_cli_ctx[n].old_cli->execute_line(repl.c_str()); \
-    } 
-
-IMPL_HOOK(0);  IMPL_HOOK(1);  IMPL_HOOK(2);  IMPL_HOOK(3);  IMPL_HOOK(4);  IMPL_HOOK(5);
-IMPL_HOOK(6);  IMPL_HOOK(7);  IMPL_HOOK(8);  IMPL_HOOK(9);  IMPL_HOOK(10); IMPL_HOOK(11);
-IMPL_HOOK(12); IMPL_HOOK(13); IMPL_HOOK(14); IMPL_HOOK(15); IMPL_HOOK(16); IMPL_HOOK(17);
-
-static bool (idaapi *g_cli_execute_line_with_ctx[MAX_CTX])(const char *) =
+template <class _> struct execute_line_with_ctx_gen_t;
+template <size_t... indices> struct execute_line_with_ctx_gen_t<std::index_sequence<indices...>>
 {
-    DEF_HOOK(0),  DEF_HOOK(1),  DEF_HOOK(2),  DEF_HOOK(3),  DEF_HOOK(4),  DEF_HOOK(5),
-    DEF_HOOK(6),  DEF_HOOK(7),  DEF_HOOK(8),  DEF_HOOK(9),  DEF_HOOK(10), DEF_HOOK(11),
-    DEF_HOOK(12), DEF_HOOK(13), DEF_HOOK(14), DEF_HOOK(15), DEF_HOOK(16), DEF_HOOK(17)
+    template <size_t n>
+    static bool idaapi execute_line(const char *line)
+    {
+        std::string repl = macro_replacer(line);
+        return g_cli_ctx[n].old_cli->execute_line(repl.c_str());
+    }
+    static constexpr bool (idaapi *callbacks[])(const char *) = { execute_line<indices>... };
 };
-#undef DEF_HOOK
-#undef IMPL_HOOK
+
+auto g_cli_execute_line_with_ctx = execute_line_with_ctx_gen_t<std::make_index_sequence<MAX_CTX>>::callbacks;
 
 // Ignore UI hooks when set
 bool g_b_ignore_ui_notification = false;
