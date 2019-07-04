@@ -54,6 +54,10 @@ static macro_def_t DEFAULT_MACROS[] =
 {
     {"$!",    "${'0x%x' % idc.here()}$",                            "Current cursor location (0x...)"},
     {"$!!",   "${'%x' % idc.here()}$",                              "Current cursor location"},
+    {"$>",    "${'0x%x' % idc.SegEnd(idc.here())}$",                "Current segment end (0x...)"},
+    {"$>>",   "${'%x' % idc.SegEnd(idc.here())}$",                  "Current segment end"},
+    {"$<",    "${'0x%x' % idc.SegStart(idc.here())}$",              "Current segment start (0x...)"},
+    {"$<<",   "${'%x' % idc.SegStart(idc.here())}$",                "Current segment start"},
     {"$[",    "${'0x%x' % idc.SelStart()}$",                        "Selection start (0x...)"},
     {"$[[",   "${'%x' % idc.SelStart()}$",                          "Selection start"},
     {"$@b",   "${'0x%x' % idc.Byte(idc.here())}$",                  "Byte value at current cursor location (0x...)" },
