@@ -15,12 +15,20 @@ All expressions should resolve to a string.
 #include <algorithm>
 #include <regex>
 #include <functional>
+
+#ifdef _MSC_VER
+    #pragma warning(push)
+    #pragma warning(disable: 4267 4244)
+#endif
 #include <ida.hpp>
 #include <loader.hpp>
 #include <kernwin.hpp>
 #include <expr.hpp>
 #include <registry.hpp>
 #include <diskio.hpp>
+#ifdef _MSC_VER
+    #pragma warning(pop)
+#endif
 
 #include "utils_impl.cpp"
 
@@ -52,24 +60,24 @@ typedef qvector<macro_def_t> macros_t;
 // Default macros
 static macro_def_t DEFAULT_MACROS[] =
 {
-    {"$!",    "${'0x%x' % idc.here()}$",                            "Current cursor location (0x...)"},
-    {"$!!",   "${'%x' % idc.here()}$",                              "Current cursor location"},
-    {"$>",    "${'0x%x' % idc.SegEnd(idc.here())}$",                "Current segment end (0x...)"},
-    {"$>>",   "${'%x' % idc.SegEnd(idc.here())}$",                  "Current segment end"},
-    {"$<",    "${'0x%x' % idc.SegStart(idc.here())}$",              "Current segment start (0x...)"},
-    {"$<<",   "${'%x' % idc.SegStart(idc.here())}$",                "Current segment start"},
-    {"$[",    "${'0x%x' % idc.SelStart()}$",                        "Selection start (0x...)"},
-    {"$[[",   "${'%x' % idc.SelStart()}$",                          "Selection start"},
-    {"$@b",   "${'0x%x' % idc.Byte(idc.here())}$",                  "Byte value at current cursor location (0x...)" },
-    {"$@B",   "${'%x' % idc.Byte(idc.here())}$",                    "Byte value at current cursor location"},
-    {"$@d",   "${'0x%x' % idc.Dword(idc.here())}$",                 "Dword value at current cursor location (0x...)"},
-    {"$@D",   "${'%x' % idc.Dword(idc.here())}$",                   "Dword value at current cursor location"},
-    {"$@q",   "${'0x%x' % idc.Qword(idc.here())}$",                 "Qword value at current cursor location (0x...)"},
-    {"$@Q",   "${'%x' % idc.Qword(idc.here())}$",                   "Qword value at current cursor location"},
-    {"$]]",   "${'%x' % idc.SelEnd()}$",                            "Selection end"},
-    {"$]",    "${'0x%x' % idc.SelEnd()}$",                          "Selection end (0x...)"},
-    {"$#",    "${'0x%x' % (idc.SelEnd() - idc.SelStart())}$",       "Selection size (0x...)"},
-    {"$##",   "${'%x' % (idc.SelEnd() - idc.SelStart())}$",         "Selection size"}
+    {"$!",    "${'0x%x' % idc.here()}$",                                              "Current cursor location (0x...)"},
+    {"$!!",   "${'%x' % idc.here()}$",                                                "Current cursor location"},
+    {"$<",    "${'0x%x' % idc.get_segm_start(idc.here())}$",                          "Current segment start (0x...)"},
+    {"$>",    "${'0x%x' % idc.get_segm_end(idc.here())}$",                            "Current segment end (0x...)"},
+    {"$<<",   "${'%x' % idc.get_segm_start(idc.here())}$",                            "Current segment start"},
+    {"$>>",   "${'%x' % idc.get_segm_end(idc.here())}$",                              "Current segment end"},
+    {"$@b",   "${'0x%x' % idc.get_wide_byte(idc.here())}$",                           "Byte value at current cursor location (0x...)" },
+    {"$@B",   "${'%x' % idc.get_wide_byte(idc.here())}$",                             "Byte value at current cursor location"},
+    {"$@d",   "${'0x%x' % idc.get_wide_dword(idc.here())}$",                          "Dword value at current cursor location (0x...)"},
+    {"$@D",   "${'%x' % idc.get_wide_dword(idc.here())}$",                            "Dword value at current cursor location"},
+    {"$@q",   "${'0x%x' % idc.get_qword(idc.here())}$",                               "Qword value at current cursor location (0x...)"},
+    {"$@Q",   "${'%x' % idc.get_qword(idc.here())}$",                                 "Qword value at current cursor location"},
+    {"$[",    "${'0x%x' % idc.read_selection_start()}$",                              "Selection start (0x...)"},
+    {"$]",    "${'0x%x' % idc.read_selection_end()}$",                                "Selection end (0x...)"},
+    {"$[[",   "${'%x' % idc.read_selection_start()}$",                                "Selection start"},
+    {"$]]",   "${'%x' % idc.read_selection_end()}$",                                  "Selection end"},
+    {"$#",    "${'0x%x' % (idc.read_selection_end() - idc.read_selection_start())}$", "Selection size (0x...)"},
+    {"$##",   "${'%x' % (idc.read_selection_end() - idc.read_selection_start())}$",   "Selection size"}
 };
 
 //-------------------------------------------------------------------------
@@ -111,7 +119,7 @@ template <size_t... indices> struct execute_line_with_ctx_gen_t<std::index_seque
     static constexpr bool (idaapi *callbacks[])(const char *) = { execute_line<indices>... };
 };
 
-auto g_cli_execute_line_with_ctx = execute_line_with_ctx_gen_t<std::make_index_sequence<MAX_CTX>>::callbacks;
+static auto g_cli_execute_line_with_ctx = execute_line_with_ctx_gen_t<std::make_index_sequence<MAX_CTX>>::callbacks;
 
 // Ignore UI hooks when set
 bool g_b_ignore_ui_notification = false;
@@ -390,6 +398,9 @@ macro_editor_t g_macro_editor;
 //--------------------------------------------------------------------------
 int idaapi init(void)
 {
+    if (!is_idaq())
+        return PLUGIN_SKIP;
+
     msg("IDA Command Line Interface macros initialized\n");
 
     hook_to_notification_point(HT_UI, ui_callback);
