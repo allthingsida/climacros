@@ -5,7 +5,7 @@ When a CLI is registered, this plugin augments its functionality so it supports 
 or to dynamic expressions evaluated in Python.
 
 To expand Python expressions dynamically, encapsulate the string in ${expression}$.
-All expressions should resolve to a string.
+All expressions should resolve to a string (i.e. have a __str__ magic method).
 
 (c) Elias Bachaalany <elias.bachaalany@gmail.com>
 */
@@ -72,12 +72,19 @@ static macro_def_t DEFAULT_MACROS[] =
     {"$@D",   "${'%x' % idc.get_wide_dword(idc.here())}$",                            "Dword value at current cursor location"},
     {"$@q",   "${'0x%x' % idc.get_qword(idc.here())}$",                               "Qword value at current cursor location (0x...)"},
     {"$@Q",   "${'%x' % idc.get_qword(idc.here())}$",                                 "Qword value at current cursor location"},
+    {"$*b",   "${'0x%x' % idc.read_dbg_byte(idc.here())}$",                           "Debugger byte value at current cursor location (0x...)" },
+    {"$*B",   "${'%x' % idc.read_dbg_byte(idc.here())}$",                             "Debugger byte value at current cursor location"},
+    {"$*d",   "${'0x%x' % idc.read_dbg_dword(idc.here())}$",                          "Debugger dword value at current cursor location (0x...)"},
+    {"$*D",   "${'%x' % idc.read_dbg_dword(idc.here())}$",                            "Debugger dword value at current cursor location"},
+    {"$*q",   "${'0x%x' % idc.read_dbg_qword(idc.here())}$",                          "Debugger qword value at current cursor location (0x...)"},
+    {"$*Q",   "${'%x' % idc.read_dbg_qword(idc.here())}$",                            "Debugger qword value at current cursor location"},
     {"$[",    "${'0x%x' % idc.read_selection_start()}$",                              "Selection start (0x...)"},
     {"$]",    "${'0x%x' % idc.read_selection_end()}$",                                "Selection end (0x...)"},
     {"$[[",   "${'%x' % idc.read_selection_start()}$",                                "Selection start"},
     {"$]]",   "${'%x' % idc.read_selection_end()}$",                                  "Selection end"},
     {"$#",    "${'0x%x' % (idc.read_selection_end() - idc.read_selection_start())}$", "Selection size (0x...)"},
-    {"$##",   "${'%x' % (idc.read_selection_end() - idc.read_selection_start())}$",   "Selection size"}
+    {"$##",   "${'%x' % (idc.read_selection_end() - idc.read_selection_start())}$",   "Selection size"},
+    {"$cls"   "${idaapi.msg_clear()}$",                                               "Clears the output window"}
 };
 
 //-------------------------------------------------------------------------
