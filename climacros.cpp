@@ -16,20 +16,7 @@ All expressions should resolve to a string (i.e. have a __str__ magic method).
 #include <regex>
 #include <functional>
 
-#ifdef _MSC_VER
-    #pragma warning(push)
-    #pragma warning(disable: 4267 4244)
-#endif
-#include <ida.hpp>
-#include <loader.hpp>
-#include <kernwin.hpp>
-#include <expr.hpp>
-#include <registry.hpp>
-#include <diskio.hpp>
-#ifdef _MSC_VER
-    #pragma warning(pop)
-#endif
-
+#include "idasdk.h"
 #include "utils_impl.cpp"
 
 constexpr char IDAREG_CLI_MACROS[] = "CLI_Macros";
@@ -37,55 +24,7 @@ constexpr int MAX_CLI_MACROS = 200;
 
 constexpr char SER_SEPARATOR[] = "\x1";
 
-//-------------------------------------------------------------------------
-// Macro definition
-struct macro_def_t
-{
-    std::string macro;
-    std::string expr;
-    std::string desc;
-
-    bool operator==(const macro_def_t &rhs) const
-    {
-        return macro == rhs.macro;
-    }
-
-    void to_string(std::string &str) const
-    {
-        str = macro + SER_SEPARATOR + expr + SER_SEPARATOR + desc;
-    }
-};
-typedef qvector<macro_def_t> macros_t;
-
-// Default macros
-static macro_def_t DEFAULT_MACROS[] =
-{
-    {"$!",    "${'0x%x' % idc.here()}$",                                              "Current cursor location (0x...)"},
-    {"$!!",   "${'%x' % idc.here()}$",                                                "Current cursor location"},
-    {"$<",    "${'0x%x' % idc.get_segm_start(idc.here())}$",                          "Current segment start (0x...)"},
-    {"$>",    "${'0x%x' % idc.get_segm_end(idc.here())}$",                            "Current segment end (0x...)"},
-    {"$<<",   "${'%x' % idc.get_segm_start(idc.here())}$",                            "Current segment start"},
-    {"$>>",   "${'%x' % idc.get_segm_end(idc.here())}$",                              "Current segment end"},
-    {"$@b",   "${'0x%x' % idc.get_wide_byte(idc.here())}$",                           "Byte value at current cursor location (0x...)" },
-    {"$@B",   "${'%x' % idc.get_wide_byte(idc.here())}$",                             "Byte value at current cursor location"},
-    {"$@d",   "${'0x%x' % idc.get_wide_dword(idc.here())}$",                          "Dword value at current cursor location (0x...)"},
-    {"$@D",   "${'%x' % idc.get_wide_dword(idc.here())}$",                            "Dword value at current cursor location"},
-    {"$@q",   "${'0x%x' % idc.get_qword(idc.here())}$",                               "Qword value at current cursor location (0x...)"},
-    {"$@Q",   "${'%x' % idc.get_qword(idc.here())}$",                                 "Qword value at current cursor location"},
-    {"$*b",   "${'0x%x' % idc.read_dbg_byte(idc.here())}$",                           "Debugger byte value at current cursor location (0x...)" },
-    {"$*B",   "${'%x' % idc.read_dbg_byte(idc.here())}$",                             "Debugger byte value at current cursor location"},
-    {"$*d",   "${'0x%x' % idc.read_dbg_dword(idc.here())}$",                          "Debugger dword value at current cursor location (0x...)"},
-    {"$*D",   "${'%x' % idc.read_dbg_dword(idc.here())}$",                            "Debugger dword value at current cursor location"},
-    {"$*q",   "${'0x%x' % idc.read_dbg_qword(idc.here())}$",                          "Debugger qword value at current cursor location (0x...)"},
-    {"$*Q",   "${'%x' % idc.read_dbg_qword(idc.here())}$",                            "Debugger qword value at current cursor location"},
-    {"$[",    "${'0x%x' % idc.read_selection_start()}$",                              "Selection start (0x...)"},
-    {"$]",    "${'0x%x' % idc.read_selection_end()}$",                                "Selection end (0x...)"},
-    {"$[[",   "${'%x' % idc.read_selection_start()}$",                                "Selection start"},
-    {"$]]",   "${'%x' % idc.read_selection_end()}$",                                  "Selection end"},
-    {"$#",    "${'0x%x' % (idc.read_selection_end() - idc.read_selection_start())}$", "Selection size (0x...)"},
-    {"$##",   "${'%x' % (idc.read_selection_end() - idc.read_selection_start())}$",   "Selection size"},
-    {"$cls",  "${idaapi.msg_clear()}$",                                               "Clears the output window"}
-};
+#include "macros.hpp"
 
 //-------------------------------------------------------------------------
 // Macro replace and expand via Python expression evaluation
@@ -170,36 +109,6 @@ const cli_t *unhook_cli(const cli_t *cli)
         return &ctx.new_cli;
     }
     return nullptr;
-}
-
-//---------------------------------------------------------------------------
-// UI callback to help us capture CLI registration
-static ssize_t idaapi ui_callback(void *, int notification_code, va_list va)
-{
-    switch (notification_code)
-    {
-        case ui_install_cli:
-        {
-            // Only capture CLIs requests not originating internally
-            if (g_b_ignore_ui_notification)
-                break;
-
-            auto cli     = va_arg(va, const cli_t *);
-            auto install = bool(va_arg(va, int));
-
-            auto hooked_cli = install ? hook_cli(cli) : unhook_cli(cli);
-            if (hooked_cli != nullptr)
-            {
-                // [Un]install the replacement CLI
-                request_install_cli(hooked_cli, install);
-
-                // Do not accept this CLI [un]registration
-                return 1;
-            }
-        }
-    }
-    // Pass-through...
-    return 0;
 }
 
 //-------------------------------------------------------------------------
@@ -414,33 +323,72 @@ inline macro_editor_t::macro_editor_t(const char *title_ = "CLI macros editor")
 {
 }
 
-macro_editor_t g_macro_editor;
+class climacros_plg_t : public plugmod_t, public event_listener_t
+{
+    macro_editor_t macro_editor;
+
+public:
+    climacros_plg_t() : plugmod_t()
+    {
+        msg("IDA Command Line Interface macros initialized\n");
+
+        macro_editor.build_macros_list();
+        hook_event_listener(HT_UI, this, HKCB_GLOBAL);
+    }
+    
+    bool idaapi run(size_t) override
+    {
+        macro_editor.choose();
+        return true;
+    }
+    
+    ssize_t idaapi on_event(ssize_t code, va_list va) override
+    {
+        //if (code != ui_msg)
+        //{
+        //    msg("got event: %d\n", int(code));
+        //    return 0;
+        //}
+
+        switch (code)
+        {
+            case ui_install_cli:
+            {
+                // Only capture CLIs requests not originating internally
+                if (g_b_ignore_ui_notification)
+                    break;
+
+                auto cli = va_arg(va, const cli_t*);
+                auto install = bool(va_arg(va, int));
+
+                auto hooked_cli = install ? hook_cli(cli) : unhook_cli(cli);
+                if (hooked_cli != nullptr)
+                {
+                    // [Un]install the replacement CLI
+                    request_install_cli(hooked_cli, install);
+
+                    // Do not accept this CLI [un]registration
+                    return 1;
+                }
+            }
+        }
+        // Pass-through...
+        return 0;
+    }
+
+    ~climacros_plg_t()
+    {
+        unhook_event_listener(HT_UI, this);
+    }
+};
 
 //--------------------------------------------------------------------------
 plugmod_t *idaapi init(void)
 {
     if (!is_idaq())
-        return PLUGIN_SKIP;
+        return nullptr;
 
-    msg("IDA Command Line Interface macros initialized\n");
-
-    hook_to_notification_point(HT_UI, ui_callback);
-    g_macro_editor.build_macros_list();
-
-    return PLUGIN_KEEP;
-}
-
-//--------------------------------------------------------------------------
-void idaapi term(void)
-{
-    unhook_from_notification_point(HT_UI, ui_callback);
-}
-
-//--------------------------------------------------------------------------
-bool idaapi run(size_t)
-{
-    g_macro_editor.choose();
-    return true;
+    return new climacros_plg_t;
 }
 
 #ifdef _DEBUG
@@ -469,12 +417,11 @@ static const char help[]    =
 plugin_t PLUGIN =
 {
   IDP_INTERFACE_VERSION,
-  PLUGIN_FIX,           // plugin flags: load once and stay until IDA exits
+  PLUGIN_FIX | PLUGIN_MULTI,
   init,                 // initialize
+  nullptr,              // terminate. this pointer may be NULL.
 
-  term,                 // terminate. this pointer may be NULL.
-
-  run,                  // invoke plugin
+  nullptr,              // invoke plugin
 
   comment,              // long comment about the plugin
                         // it could appear in the status line
