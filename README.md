@@ -1,10 +1,10 @@
 # What is *climacros*?
 
-CLI macros is a productivity tool that lets you define and use static or dynamic macros in IDA's command line interfaces (Python, IDC, WinDbg, BochDbg, Gdb, etc.).
+CLI macros is a productivity tool that lets you define and use static or dynamic macros in IDA's command line interfaces (IDC, Python, WinDbg, BochDbg, gdb, etc.).
 
 ![Quick introduction](docs/_resources/climacros-vid-1.gif)
 
-# Usage
+## Usage
 
 When installed, *climacros* is always active. It comes with a predetermined set of macros:
 
@@ -12,7 +12,7 @@ When installed, *climacros* is always active. It comes with a predetermined set 
 
 To create or edit new macros, simply invoke the macro editor from the "Quick plugins view" window (Ctrl-3).
 
-## Static macros
+### Static macros
 
 Static macros get substituted as-is in the CLI. For example the following macro:
 
@@ -22,7 +22,7 @@ Outputs the following when executed:
 
 ![Static macro output](docs/_resources/climacros-static-macro-run.png)
 
-## Dynamic macros
+### Dynamic macros
 
 It is possible to define dynamic macros that get expanded as a result of evaluating a Python expression that returns a string.
 For example, the `idc.here()` command is very useful and can be abbreviated with a shorter macro, say `$!` or `${here}`.
@@ -41,7 +41,7 @@ A macro is invoked when it is present in a CLI command:
 
 ![Long form here() macro](docs/_resources/climacros-dynamic-run-here.png)
 
-## Inline substitution
+### Inline substitution
 
 You don't have to define macros in order to get expressions expansion in the CLI. If you need a one-off expression expansion in the CLI, just define the expression inline:
 
@@ -55,12 +55,15 @@ v = "${str(1 + 2 + 3 + 4)}$"
 
 The expression should always evaluate to a **string**, therefore always remember to `str()` the expression or to format it `"%x" % expr` if it does not return a string.
 
-# Installation
+## Installation
 
-*climacros* is written in C++ with IDA's SDK and therefore it should be deployed like a regular plugin. Copy the plugin binaries to either of those locations:
-* `<IDA_install_folder>/plugins`
-* `%APPDATA%\Hex-Rays/plugins`
+*climacros* is written in C++ with IDA's SDK and therefore it should be deployed like a regular plugin. 
 
-Since the plugin uses IDA's SDK and no other OS specific functions, the plugin should be compilable for macOS and Linux just fine. I only provide MS Windows binaries. Please check the [releases page](https://github.com/0xeb/ida-climacros/releases).
+It requires these components to build:
+
+- [`ida-cmake`](https://github.com/allthingsida/ida-cmake)
+- and [`idax`](https://github.com/allthingsida/idax)
 
 The first time you run the plugin, it will be populate with the default macros. If you delete all the macros, you won't get back the default macros unless you delete the following file: `%APPDATA%\Hex-Rays/firstrun.climacros`.
+
+On Windows, the macros are saved in the registry under: `HKEY_CURRENT_USER\SOFTWARE\Hex-Rays\IDA\CLI_Macros`.

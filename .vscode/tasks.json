@@ -1,0 +1,11 @@
+{
+    "version": "2.0.0",
+    "tasks": [{
+        "label": "Build climacros",
+        "type": "shell",
+        "command": "cmake",
+        "args": ["--build", "C:/Users/elias/Projects/github/allthingsida/climacros/build", "--target", "climacros", "--config", "Release"],
+        "group": { "kind": "build", "isDefault": true },
+        "problemMatcher": "$msCompile"
+    }]
+}

@@ -10,319 +10,12 @@ All expressions should resolve to a string (i.e. have a __str__ magic method).
 (c) Elias Bachaalany <elias.bachaalany@gmail.com>
 */
 
-#include <type_traits>
-#include <string>
-#include <algorithm>
-#include <regex>
-#include <functional>
-
 #include "idasdk.h"
-#include "utils_impl.cpp"
-
-constexpr char IDAREG_CLI_MACROS[] = "CLI_Macros";
-constexpr int MAX_CLI_MACROS = 200;
-
-constexpr char SER_SEPARATOR[] = "\x1";
-
-#include "macros.hpp"
+#include <idax/xcallbacks.hpp>
+#include "cli_utils.h"
+#include "macro_editor.h"
 
 //-------------------------------------------------------------------------
-// Macro replace and expand via Python expression evaluation
-macro_replacer_t macro_replacer(
-    [](std::string expr)->std::string
-    {
-        if (auto py = pylang())
-        {
-            qstring errbuf;
-            idc_value_t rv;
-            if (py->eval_expr(&rv, BADADDR, expr.c_str(), &errbuf) && rv.vtype == VT_STR)
-                return rv.qstr().c_str();
-        }
-        return std::move(expr);
-    }
-);
-
-//-------------------------------------------------------------------------
-// Context structure to allow hooking CLIs
-struct cli_ctx_t
-{
-    const cli_t *old_cli;
-    cli_t new_cli;
-};
-
-#define MAX_CTX 18
-static cli_ctx_t g_cli_ctx[MAX_CTX] = {};
-
-//-------------------------------------------------------------------------
-// Mechanism to create cli->execute_line() callback with user data
-#define DEF_HOOK(n) execute_line_with_ctx_##n
-#define IMPL_HOOK(n) \
-    static bool idaapi execute_line_with_ctx_##n(const char *line) \
-    { \
-        std::string repl = macro_replacer(line); \
-        return g_cli_ctx[n].old_cli->execute_line(repl.c_str()); \
-    } 
-
-IMPL_HOOK(0);  IMPL_HOOK(1);  IMPL_HOOK(2);  IMPL_HOOK(3);  IMPL_HOOK(4);  IMPL_HOOK(5);
-IMPL_HOOK(6);  IMPL_HOOK(7);  IMPL_HOOK(8);  IMPL_HOOK(9);  IMPL_HOOK(10); IMPL_HOOK(11);
-IMPL_HOOK(12); IMPL_HOOK(13); IMPL_HOOK(14); IMPL_HOOK(15); IMPL_HOOK(16); IMPL_HOOK(17);
-
-static bool (idaapi *g_cli_execute_line_with_ctx[MAX_CTX])(const char *) =
-{
-    DEF_HOOK(0),  DEF_HOOK(1),  DEF_HOOK(2),  DEF_HOOK(3),  DEF_HOOK(4),  DEF_HOOK(5),
-    DEF_HOOK(6),  DEF_HOOK(7),  DEF_HOOK(8),  DEF_HOOK(9),  DEF_HOOK(10), DEF_HOOK(11),
-    DEF_HOOK(12), DEF_HOOK(13), DEF_HOOK(14), DEF_HOOK(15), DEF_HOOK(16), DEF_HOOK(17)
-};
-#undef DEF_HOOK
-#undef IMPL_HOOK
-
-// Ignore UI hooks when set
-bool g_b_ignore_ui_notification = false;
-
-//-------------------------------------------------------------------------
-const cli_t *hook_cli(const cli_t *cli)
-{
-    for (int i=0; i < qnumber(g_cli_ctx); ++i)
-    {
-        auto &ctx = g_cli_ctx[i];
-        if (ctx.old_cli != nullptr)
-            continue;
-
-        ctx.old_cli = cli;
-        ctx.new_cli = *cli;
-        ctx.new_cli.execute_line = g_cli_execute_line_with_ctx[i];
-        return &ctx.new_cli;
-    }
-    return nullptr;
-}
-
-//-------------------------------------------------------------------------
-const cli_t *unhook_cli(const cli_t *cli)
-{
-    for (auto &ctx: g_cli_ctx)
-    {
-        if (ctx.old_cli != cli)
-            continue;
-
-        ctx.old_cli = nullptr;
-
-        return &ctx.new_cli;
-    }
-    return nullptr;
-}
-
-//-------------------------------------------------------------------------
-// Modal macro editor
-struct macro_editor_t: public chooser_t
-{
-protected:
-    static const uint32 flags_;
-    static const int widths_[];
-    static const char *const header_[];
-
-    macros_t m_macros;
-
-    static bool edit_macro_def(macro_def_t &def, bool as_new)
-    {
-        static const char form_fmt[] =
-            "%s\n"
-            "\n"
-            "%s"
-            "<~E~xpression :q2:0:60::>\n"
-            "<~D~escription:q3:0:60::>\n"
-            "\n";
-
-        // A new macro can edit all 3 fields. An existing one cannot change its name.
-        int r;
-        qstring form;
-        form.sprnt(
-            form_fmt, 
-            as_new ? "New macro" : "Edit macro",
-            as_new ? "<~M~acro      :q1:0:60::>\n" : "");
-        qstring macro = def.macro.c_str(), expr = def.expr.c_str(), desc = def.desc.c_str();
-        if (as_new)
-            r = ask_form(form.c_str(), &macro, &expr, &desc);
-        else
-            r = ask_form(form.c_str(), &expr, &desc);
-
-        if (r > 0)
-        {
-            if (as_new)
-                def.macro = macro.c_str();
-            def.expr  = expr.c_str();
-            def.desc  = desc.c_str();
-            return true;
-        }
-        return false;
-    }
-
-    void reg_del_macro(const macro_def_t &macro)
-    {
-        std::string ser;
-        macro.to_string(ser);
-        reg_update_strlist(IDAREG_CLI_MACROS, nullptr, MAX_CLI_MACROS, ser.c_str());
-    }
-
-    void reg_save_macro(const macro_def_t &macro, std::string *ser_out = nullptr)
-    {
-        std::string ser;
-        macro.to_string(ser);
-        reg_update_strlist(IDAREG_CLI_MACROS, ser.c_str(), MAX_CLI_MACROS);
-        if (ser_out != nullptr)
-            *ser_out = std::move(ser);
-    }
-
-    // Add a new macro
-    macro_def_t *add_macro(macro_def_t macro)
-    {
-        auto &new_macro = m_macros.push_back();
-        new_macro       = std::move(macro);
-        return &new_macro;
-    }
-
-    bool init() override
-    {
-        build_macros_list();
-        return true;
-    }
-
-    size_t idaapi get_count() const override
-    {
-        return m_macros.size();
-    }
-
-    void idaapi get_row(
-        qstrvec_t *cols,
-        int *icon,
-        chooser_item_attrs_t *attrs,
-        size_t n) const override
-    {
-        auto &macro = m_macros[n];
-        cols->at(0) = macro.macro.c_str();
-        cols->at(1) = macro.expr.c_str();
-        cols->at(2) = macro.desc.c_str();
-    }
-
-    // Add a new script
-    cbret_t idaapi ins(ssize_t n) override
-    {
-        macro_def_t new_macro;
-        while (true)
-        {
-            if (!edit_macro_def(new_macro, true))
-                return {};
-
-            auto p = m_macros.find({ new_macro.macro });
-            if (p == m_macros.end())
-                break;
-
-            warning("A macro with the name '%s' already exists. Please choose another name!", new_macro.macro.c_str());
-        }
-
-        reg_save_macro(*add_macro(std::move(new_macro)));
-
-        build_macros_list();
-        return cbret_t(0, chooser_base_t::ALL_CHANGED);
-    }
-
-    // Remove a script from the list
-    cbret_t idaapi del(size_t n) override
-    {
-        reg_del_macro(m_macros[n]);
-
-        build_macros_list();
-        return adjust_last_item(n);
-    }
-
-    // Edit the macro
-    cbret_t idaapi edit(size_t n) override
-    {
-        // Take a copy of the old macro
-        auto old_macro = m_macros[n];
-
-        // In place edit the macro
-        auto &macro = m_macros[n];
-        if (!edit_macro_def(macro, false))
-            return cbret_t(n, chooser_base_t::NOTHING_CHANGED);
-
-        // Delete the old macro
-        reg_del_macro(old_macro);
-
-        // Re-insert the macro with different fields (same macro name)
-        reg_save_macro(macro);
-
-        build_macros_list();
-        return cbret_t(n, chooser_base_t::ALL_CHANGED);
-    }
-
-public:
-    macro_editor_t(const char *title_);
-
-    // Rebuilds the macros list
-    void build_macros_list()
-    {
-        // Read all the serialized macro definitions
-        qstrvec_t ser_macros;
-        reg_read_strlist(&ser_macros, IDAREG_CLI_MACROS);
-        m_macros.qclear();
-
-        // Empty macros?
-        if (ser_macros.empty())
-        {
-            // If this is not the first run, then keep the macros list empty
-            qstring first_run;
-            first_run.sprnt("%s/firstrun.climacros", get_user_idadir());
-            if (!qfileexist(first_run.c_str()))
-            {
-                // Populate with the default macros (once)
-                FILE *fp = qfopen(first_run.c_str(), "w"); qfclose(fp);
-                for (auto &macro: DEFAULT_MACROS)
-                {
-                    std::string ser_macro;
-                    reg_save_macro(*add_macro(macro), &ser_macro);
-                    ser_macros.push_back(ser_macro.c_str());
-                }
-            }
-        }
-        else
-        {
-            for (auto &ser_macro: ser_macros)
-            {
-                char *macro_str = ser_macro.extract();
-                char *sptr;
-                int icol = 0;
-                macro_def_t macro;
-                for (auto tok = qstrtok(macro_str, SER_SEPARATOR, &sptr);
-                     tok != nullptr;
-                     tok = qstrtok(nullptr, SER_SEPARATOR, &sptr), ++icol)
-                {
-                    if (icol == 0)      macro.macro = tok;
-                    else if (icol == 1) macro.expr  = tok;
-                    else if (icol == 2) macro.desc  = tok;
-                }
-                add_macro(std::move(macro));
-                qfree(macro_str);
-            }
-        }
-
-        // Re-create the pattern replacement
-        macro_replacer.begin_update();
-        for (auto &m: m_macros)
-            macro_replacer.update(m.macro, m.expr);
-        macro_replacer.end_update();
-    }
-};
-
-const uint32 macro_editor_t::flags_ = CH_MODAL | CH_KEEP | CH_CAN_DEL | CH_CAN_EDIT | CH_CAN_INS | CH_CAN_REFRESH;
-
-const int macro_editor_t::widths_[3]         = { 10, 30, 70 };
-const char *const macro_editor_t::header_[3] = { "Macro", "Expression", "Description" };
-
-inline macro_editor_t::macro_editor_t(const char *title_ = "CLI macros editor")
-        : chooser_t(flags_, qnumber(widths_), widths_, header_, title_)
-{
-}
-
 class climacros_plg_t : public plugmod_t, public event_listener_t
 {
     macro_editor_t macro_editor;
@@ -334,22 +27,53 @@ public:
 
         macro_editor.build_macros_list();
         hook_event_listener(HT_UI, this, HKCB_GLOBAL);
+
+        // Hook pre-existing CLIs (like Python) that were loaded before our plugin
+        hook_preexisting_clis();
     }
-    
+
+    void hook_preexisting_clis()
+    {
+        // Tabular approach: define CLI finders to try
+        struct cli_finder_t
+        {
+            const char* name;
+            cli_t* (*finder)();
+        };
+
+        static const cli_finder_t cli_finders[] = 
+        {
+            {"Python", find_python_cli},
+            {"IDC",    find_idc_cli}
+        };
+
+        // Try to find and hook each CLI
+        for (const auto& finder : cli_finders)
+        {
+            cli_t* cli = finder.finder();
+            if (cli != nullptr)
+            {
+                // Hook the CLI
+                auto new_cli = hook_cli(cli);
+                if (new_cli != nullptr)
+                {
+                    // Uninstall previous CLI and replace with new hooked CLI
+                    request_install_cli(cli, false);
+                    request_install_cli(new_cli, true);
+                    msg("climacros: successfully hooked pre-existing CLI '%s'\n", cli->sname);
+                }
+            }
+        }
+    }
+
     bool idaapi run(size_t) override
     {
         macro_editor.choose();
         return true;
     }
-    
+
     ssize_t idaapi on_event(ssize_t code, va_list va) override
     {
-        //if (code != ui_msg)
-        //{
-        //    msg("got event: %d\n", int(code));
-        //    return 0;
-        //}
-
         switch (code)
         {
             case ui_install_cli:
@@ -361,18 +85,26 @@ public:
                 auto cli = va_arg(va, const cli_t*);
                 auto install = bool(va_arg(va, int));
 
-                auto hooked_cli = install ? hook_cli(cli) : unhook_cli(cli);
-                if (hooked_cli != nullptr)
+                if (install)
                 {
-                    // [Un]install the replacement CLI
-                    request_install_cli(hooked_cli, install);
-
-                    // Do not accept this CLI [un]registration
-                    return 1;
+                    // Create a copy of the CLI with our execute_line hook
+                    auto new_cli = hook_cli(cli);
+                    // Remove the old CLI and install the new one
+                    request_install_cli(cli, false);
+                    request_install_cli(new_cli, true);
+                    msg("climacros: hooked CLI '%s'\n", cli->sname);
+                }
+                else
+                {
+                    // Find the new CLI using the prevously registered CLI
+                    // Note: from the original plugin perspective, the old CLI was never uninstalled
+                    auto new_cli = unhook_cli(cli);
+                    // Remove the new CLI (which we installed when we uninstalled the old CLI)
+                    request_install_cli(new_cli, false);
+                    msg("climacros: unhooked CLI '%s'\n", cli->sname);
                 }
             }
         }
-        // Pass-through...
         return 0;
     }
 
@@ -400,11 +132,11 @@ plugmod_t *idaapi init(void)
 
 //--------------------------------------------------------------------------
 static const char comment[] = "Use macros in CLIs";
-static const char help[]    = 
+static const char help[]    =
     "Define your own macros and use then in the CLIs.\n"
     "Comes in handy with the WinDbg or other debuggers' CLIs\n"
     "\n"
-    "climacros is developed by Elias Bachaalany. Please see https://github.com/0xeb/ida-climacros for more information\n"
+    "climacros is developed by Elias Bachaalany. Please see https://github.com/allthingsida/ida-climacros for more information\n"
     "\0"
     __DATE__ " " __TIME__ "\n"
     "\n";

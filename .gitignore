@@ -1,5 +1,5 @@
-build/
-build64/
+build*/
+_old/
 .vs/
 Debug/
 x64/

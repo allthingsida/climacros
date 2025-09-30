@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [{
+        "name": "Debug climacros",
+        "type": "cppvsdbg",
+        "request": "launch",
+        "program": "C:/Users/elias/Projects/ida/idasdk92/bin/ida.exe",
+        "args": ["-t"],
+        "stopAtEntry": false,
+        "cwd": "C:/Users/elias/Projects/github/allthingsida/climacros",
+        "environment": [],
+        "console": "integratedTerminal"
+    }]
+}

@@ -1,17 +1,22 @@
-cmake_minimum_required(VERSION 3.2 FATAL_ERROR)
-
+cmake_minimum_required(VERSION 3.27)
 project(climacros)
+set(CMAKE_CXX_STANDARD 20)
 
-include($ENV{IDASDK}/ida-cmake/common.cmake)
+# Include IDA SDK bootstrap
+include($ENV{IDASDK}/ida-cmake/bootstrap.cmake)
+find_package(idasdk REQUIRED)
 
-# Included file
-list(APPEND DISABLED_SOURCES utils_impl.cpp)
-
-set(PLUGIN_NAME              climacros)
-set(PLUGIN_SOURCES           climacros.cpp macros.hpp idasdk.h ${DISABLED_SOURCES})
-set(PLUGIN_RUN_ARGS          "-t") # Debug messages for the debugger
-set(PLUGIN_OUTPUT_NAME       "00${PROJECT_NAME}")
-
-set_source_files_properties(${DISABLED_SOURCES} PROPERTIES LANGUAGE "")
-
-generate()
+# Add plugin using ida-cmake helper function
+ida_add_plugin(climacros
+    SOURCES
+        climacros.cpp
+        cli_utils.cpp
+        cli_utils.h
+        macro_editor.cpp
+        macro_editor.h
+        idasdk.h
+    OUTPUT_NAME
+        climacros
+    DEBUG_ARGS
+        "-t"
+)
