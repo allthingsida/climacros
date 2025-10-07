@@ -8,7 +8,7 @@ find_package(idasdk REQUIRED)
 
 # Add idacpp library (disable examples to avoid build issues)
 set(IDACPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-add_subdirectory(../idacpp ${CMAKE_CURRENT_BINARY_DIR}/idacpp)
+add_subdirectory($ENV{IDASDK}/include/idacpp ${CMAKE_CURRENT_BINARY_DIR}/idacpp)
 
 # Add plugin using ida-cmake helper function
 ida_add_plugin(climacros
