@@ -8,7 +8,9 @@ CLI Utils: Cross-platform code for CLI finding and hooking
 #include "idasdk.h"
 #include "cli_utils.h"
 #include "macro_editor.h"
-#include <idax/xcallbacks.hpp>
+#include <idacpp/callbacks/callbacks.hpp>
+
+using namespace idacpp::callbacks;
 
 #ifdef _WIN32
     #include <windows.h>

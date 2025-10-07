@@ -31,4 +31,6 @@
     #undef strlwr
 #endif
 
-#include <idax/xexpr.hpp>
+#include <idacpp/expr/expr.hpp>
+
+using idacpp::expr::pylang;

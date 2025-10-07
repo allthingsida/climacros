@@ -11,9 +11,17 @@ All expressions should resolve to a string (i.e. have a __str__ magic method).
 */
 
 #include "idasdk.h"
-#include <idax/xcallbacks.hpp>
+#include <idacpp/callbacks/callbacks.hpp>
 #include "cli_utils.h"
 #include "macro_editor.h"
+
+#ifdef _WIN32
+    #include <windows.h>
+#else
+    #include <dlfcn.h>
+#endif
+
+using namespace idacpp::callbacks;
 
 //-------------------------------------------------------------------------
 class climacros_plg_t : public plugmod_t, public event_listener_t
@@ -30,6 +38,15 @@ public:
 
         // Hook pre-existing CLIs (like Python) that were loaded before our plugin
         hook_preexisting_clis();
+
+        // Pin ourselves in memory to prevent crashes from dangling CLI callback pointers
+#ifdef _WIN32
+        LoadLibraryA("climacros.dll");
+#elif defined(__APPLE__)
+        dlopen("climacros.dylib", RTLD_NOLOAD | RTLD_LAZY);
+#else
+        dlopen("climacros.so", RTLD_NOLOAD | RTLD_LAZY);
+#endif
     }
 
     void hook_preexisting_clis()
