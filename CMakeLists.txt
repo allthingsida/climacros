@@ -6,8 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 include($ENV{IDASDK}/ida-cmake/bootstrap.cmake)
 find_package(idasdk REQUIRED)
 
-# Add idacpp library (disable examples to avoid build issues)
-set(IDACPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+# Add idacpp library
 add_subdirectory($ENV{IDASDK}/include/idacpp ${CMAKE_CURRENT_BINARY_DIR}/idacpp)
 
 # Add plugin using ida-cmake helper function
