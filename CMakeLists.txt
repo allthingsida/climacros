@@ -19,6 +19,7 @@ ida_add_plugin(climacros
         macro_editor.cpp
         macro_editor.h
         idasdk.h
+        README.md
     OUTPUT_NAME
         climacros
     DEBUG_ARGS
