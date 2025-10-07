@@ -13,7 +13,7 @@ add_subdirectory($ENV{IDASDK}/include/idacpp ${CMAKE_CURRENT_BINARY_DIR}/idacpp)
 # Add plugin using ida-cmake helper function
 ida_add_plugin(climacros
     SOURCES
-        climacros.cpp
+        plugin.cpp
         cli_utils.cpp
         cli_utils.h
         macro_editor.cpp
