@@ -1,3 +1,9 @@
+// Copyright (c) 2019-2026 Elias Bachaalany
+// SPDX-License-Identifier: LicenseRef-Human-Origin-Source-1.0
+//
+// This file is licensed under the Human-Origin Source License v1.0.
+// See LICENSE.
+
 #pragma once
 
 #ifdef _MSC_VER
@@ -5,6 +11,7 @@
     #pragma warning(disable: 4267 4244 4146)
 #endif
 #include <ida.hpp>
+#include <idp.hpp>
 #include <loader.hpp>
 #include <kernwin.hpp>
 #include <expr.hpp>
@@ -31,6 +38,6 @@
     #undef strlwr
 #endif
 
-#include <idacpp/expr/expr.hpp>
+#include <libidacpp/expr/expr.hpp>
 
-using idacpp::expr::pylang;
+using libidacpp::expr::pylang;

@@ -1,50 +1,34 @@
-/*
-Macro Editor: Complete macro subsystem for IDA CLI macros
+// Copyright (c) 2019-2026 Elias Bachaalany
+// SPDX-License-Identifier: LicenseRef-Human-Origin-Source-1.0
+//
+// This file is licensed under the Human-Origin Source License v1.0.
+// See LICENSE.
 
-This module contains:
-- Macro data structures and default macros
-- Macro replacement engine
-- Macro editor UI
+/*
+Macro Editor: the Ctrl-3 chooser UI for managing CLI macros.
+
+This is now a thin UI layer: persistence/serialization live in macro_store.{h,cpp}
+(pure) behind a backend (registry_backend_t, macro_store_registry.{h,cpp}), and the
+substitution engine lives in macro_replacer.{h,cpp} (pure). The editor only edits
+entries and keeps the runtime macro_replacer in sync.
 */
 
 #pragma once
 
-#include <string>
-#include <regex>
-#include <map>
-#include <functional>
 #include "idasdk.h"
+#include "macro_store.h"
+#include "macro_store_registry.h"
+#include "macro_replacer.h"
 
 //-------------------------------------------------------------------------
-// Constants for macro serialization and CLI management
-//-------------------------------------------------------------------------
-constexpr char IDAREG_CLI_MACROS[] = "CLI_Macros";
-constexpr int MAX_CLI_MACROS = 200;
-constexpr int MAX_CLIS = 20;
-constexpr char SER_SEPARATOR[] = "\x1";
+// Global macro replacer instance (defined in macro_editor.cpp; evaluates the
+// dynamic ${expr}$ form via IDA's Python extlang).
+extern macro_replacer_t macro_replacer;
 
 //-------------------------------------------------------------------------
-// Macro definition structure
-//-------------------------------------------------------------------------
-struct macro_def_t
-{
-    std::string macro;
-    std::string expr;
-    std::string desc;
-
-    bool operator==(const macro_def_t& rhs) const
-    {
-        return macro == rhs.macro;
-    }
-
-    void to_string(std::string& str) const
-    {
-        str = macro + SER_SEPARATOR + expr + SER_SEPARATOR + desc;
-    }
-};
-typedef qvector<macro_def_t> macros_t;
-
-// Default macros
+// Default macros — the single source of truth. The public README macro table is
+// generated from this array by kb-ati/climacros/scripts/gen_macros_readme.py, so
+// keep the `{ "trigger", "expr", "desc" }` literal shape and this variable name.
 static macro_def_t DEFAULT_MACROS[] =
 {
     {"$!",    "${'0x%x' % idc.here()}$",                                              "Current cursor location (0x...)"},
@@ -55,6 +39,8 @@ static macro_def_t DEFAULT_MACROS[] =
     {"$>>",   "${'%x' % idc.get_segm_end(idc.here())}$",                              "Current segment end"},
     {"$@b",   "${'0x%x' % idc.get_wide_byte(idc.here())}$",                           "Byte value at current cursor location (0x...)" },
     {"$@B",   "${'%x' % idc.get_wide_byte(idc.here())}$",                             "Byte value at current cursor location"},
+    {"$@w",   "${'0x%x' % idc.get_wide_word(idc.here())}$",                           "Word value at current cursor location (0x...)"},
+    {"$@W",   "${'%x' % idc.get_wide_word(idc.here())}$",                             "Word value at current cursor location"},
     {"$@d",   "${'0x%x' % idc.get_wide_dword(idc.here())}$",                          "Dword value at current cursor location (0x...)"},
     {"$@D",   "${'%x' % idc.get_wide_dword(idc.here())}$",                            "Dword value at current cursor location"},
     {"$@q",   "${'0x%x' % idc.get_qword(idc.here())}$",                               "Qword value at current cursor location (0x...)"},
@@ -71,63 +57,25 @@ static macro_def_t DEFAULT_MACROS[] =
     {"$]]",   "${'%x' % idc.read_selection_end()}$",                                  "Selection end"},
     {"$#",    "${'0x%x' % (idc.read_selection_end() - idc.read_selection_start())}$", "Selection size (0x...)"},
     {"$##",   "${'%x' % (idc.read_selection_end() - idc.read_selection_start())}$",   "Selection size"},
+
+    // Function bounds (parens = function)
+    {"$(",    "${(lambda f: '0x%x' % f.start_ea if f else '?')(idaapi.get_func(idc.here()))}$", "Current function start (0x...)"},
+    {"$)",    "${(lambda f: '0x%x' % f.end_ea if f else '?')(idaapi.get_func(idc.here()))}$",   "Current function end (0x...)"},
+
+    // Navigation ('+' = next item, '-' = previous item)
+    {"$+",    "${'0x%x' % idc.next_head(idc.here())}$",                               "Next item address (0x...)"},
+    {"$-",    "${'0x%x' % idc.prev_head(idc.here())}$",                               "Previous item address (0x...)"},
+
+    // Module-relative addresses
+    {"$^",    "${'0x%x' % (idc.here() - idaapi.get_imagebase())}$",                   "RVA of cursor (offset from image base) (0x...)"},
+    {"$_",    "${'0x%x' % idaapi.get_imagebase()}$",                                  "Image base (0x...)"},
+
     {"$cls",  "${idaapi.msg_clear()}$",                                               "Clears the output window"}
 };
 
 //-------------------------------------------------------------------------
-// Macro Replacement Engine
+// Modal macro editor (Ctrl-3)
 //-------------------------------------------------------------------------
-
-// Utility class to replace macros with static patterns and dynamic expressions
-class macro_replacer_t
-{
-public:
-    using repl_func_t = std::function<std::string(std::string)>;
-
-private:
-    static std::regex RE_EVAL;
-    std::regex re_replace;
-
-    struct LongerPatternSort
-    {
-        bool operator()(const std::string& lhs, const std::string& rhs) const
-        {
-            if (lhs.size() > rhs.size())
-                return true;
-            else if (lhs.size() < rhs.size())
-                return false;
-            else
-                return lhs < rhs;
-        }
-    };
-    std::map<std::string, std::string, LongerPatternSort> replace_map;
-
-    repl_func_t m_repl_func;
-
-public:
-    macro_replacer_t(repl_func_t repl_func);
-
-    // Replace macros in text
-    std::string operator()(const char* text);
-    std::string operator()(std::string text);
-
-    // Similar to Python's "re.escape()"
-    static std::string escape_re(const std::string re_text);
-
-    // Update the macro replacement map
-    void begin_update();
-    void update(std::string macro, std::string expr);
-    void end_update();
-};
-
-// Global macro replacer instance
-extern macro_replacer_t macro_replacer;
-
-//-------------------------------------------------------------------------
-// Macro Editor UI
-//-------------------------------------------------------------------------
-
-// Modal macro editor
 class macro_editor_t: public chooser_t
 {
 protected:
@@ -135,21 +83,11 @@ protected:
     static const int widths_[];
     static const char *const header_[];
 
-    macros_t m_macros;
+    registry_backend_t m_backend;   // production persistence (IDA registry)
+    macro_store_t      m_store;     // in-memory list kept in sync with m_backend
 
-    // Edit a macro definition using a modal dialog
-    // Parameters:
-    //   def    - The macro definition to edit
-    //   as_new - true if creating new macro, false if editing existing
-    // Returns: true if user confirmed changes, false if cancelled
+    // Edit a macro definition using a modal dialog. Returns true if confirmed.
     static bool edit_macro_def(macro_def_t &def, bool as_new);
-
-    // Registry operations
-    void reg_del_macro(const macro_def_t &macro);
-    void reg_save_macro(const macro_def_t &macro, std::string *ser_out = nullptr);
-
-    // Add a new macro to the list
-    macro_def_t *add_macro(macro_def_t macro);
 
     // Chooser overrides
     bool init() override;
@@ -168,6 +106,7 @@ protected:
 public:
     macro_editor_t(const char *title_ = "CLI macros editor");
 
-    // Rebuilds the macros list from registry and updates the macro replacer
-    void build_macros_list();
+    // Load persisted macros (populating defaults on first run) and sync the
+    // runtime macro_replacer. Called at plugin init and after every edit.
+    void load();
 };

@@ -1,157 +1,40 @@
-/*
-Macro Editor: Complete macro subsystem implementation
+// Copyright (c) 2019-2026 Elias Bachaalany
+// SPDX-License-Identifier: LicenseRef-Human-Origin-Source-1.0
+//
+// This file is licensed under the Human-Origin Source License v1.0.
+// See LICENSE.
 
-(c) Elias Bachaalany <elias.bachaalany@gmail.com>
+/*
+Macro Editor UI (Ctrl-3 chooser). Persistence lives in macro_store.{h,cpp}, the
+registry backend in macro_store_registry.{h,cpp}, and the substitution engine in
+macro_replacer.{h,cpp}. This file wires them to the chooser and owns the runtime
+macro_replacer instance.
 */
 
-#include <algorithm>
 #include "macro_editor.h"
 
 //-------------------------------------------------------------------------
-// Custom regex_replace with callback (similar to Python's re.sub())
-// Based on https://stackoverflow.com/a/37516316
-//-------------------------------------------------------------------------
-template<class BidirIt, class Traits, class CharT, class UnaryFunction>
-static std::basic_string<CharT> regex_replace_cb(
-    BidirIt first,
-    BidirIt last,
-    const std::basic_regex<CharT, Traits> &re,
-    UnaryFunction f)
-{
-    std::basic_string<CharT> s;
-
-    typename std::match_results<BidirIt>::difference_type positionOfLastMatch = 0;
-    auto endOfLastMatch = first;
-
-    auto callback = [&](const std::match_results<BidirIt> &match)
-    {
-        auto positionOfThisMatch = match.position(0);
-        auto diff = positionOfThisMatch - positionOfLastMatch;
-
-        auto startOfThisMatch = endOfLastMatch;
-        std::advance(startOfThisMatch, diff);
-
-        s.append(endOfLastMatch, startOfThisMatch);
-        s.append(f(match));
-
-        auto lengthOfMatch = match.length(0);
-
-        positionOfLastMatch = positionOfThisMatch + lengthOfMatch;
-
-        endOfLastMatch = startOfThisMatch;
-        std::advance(endOfLastMatch, lengthOfMatch);
-    };
-
-    std::regex_iterator<BidirIt> begin(first, last, re), end;
-    std::for_each(begin, end, callback);
-
-    s.append(endOfLastMatch, last);
-
-    return s;
-}
-
-template<class Traits, class CharT, class UnaryFunction>
-static std::string regex_replace_cb(
-    const std::string &s,
-    const std::basic_regex<CharT, Traits> &re,
-    UnaryFunction f)
-{
-    return regex_replace_cb(s.cbegin(), s.cend(), re, f);
-}
-
-//-------------------------------------------------------------------------
-// Macro Replacer Implementation
-//-------------------------------------------------------------------------
-
-std::regex macro_replacer_t::RE_EVAL = std::regex(R"(\$\{(.+?)\}\$)");
-
-macro_replacer_t::macro_replacer_t(repl_func_t repl_func)
-    : m_repl_func(repl_func)
-{
-}
-
-std::string macro_replacer_t::operator()(const char* text)
-{
-    return operator()(std::string(text));
-}
-
-std::string macro_replacer_t::operator()(std::string text)
-{
-    if (!replace_map.empty())
-        text = regex_replace_cb(text, re_replace, [this](auto &m) { return replace_map[m.str(0)]; });
-
-    return regex_replace_cb(text, RE_EVAL, [this](auto &m) { return m_repl_func(m.str(1)); });
-}
-
-// Similar to Python's "re.escape()"
-std::string macro_replacer_t::escape_re(const std::string re_text)
-{
-    std::string out;
-    out.reserve(re_text.size() * 2);
-    for (auto ch: re_text)
-    {
-        if (isalnum(ch))
-        {
-            out += ch;
-            continue;
-        }
-        else if (ch == 0)
-        {
-            out += "\\x0";
-        }
-        else
-        {
-            out += '\\';
-            out += ch;
-        }
-    }
-    return out;
-}
-
-void macro_replacer_t::begin_update()
-{
-    replace_map.clear();
-}
-
-void macro_replacer_t::update(std::string macro, std::string expr)
-{
-    replace_map[macro] = expr;
-}
-
-void macro_replacer_t::end_update()
-{
-    if (replace_map.empty())
-        return;
-
-    std::string re_str;
-    for (auto &kv: replace_map)
-    {
-        re_str.append(escape_re(kv.first));
-        re_str.append("|");
-    }
-    // Get rid of the trailing '|'
-    re_str.pop_back();
-
-    // Form the single regular expression
-    re_replace = re_str;
-}
-
-//-------------------------------------------------------------------------
-// Global macro replacer instance
-// Macro replace and expand via Python expression evaluation
+// Global macro replacer instance.
+// Expands the dynamic ${expr}$ form by evaluating expr through IDA's Python
+// extlang (via libidacpp::expr); the result must be a string.
 macro_replacer_t macro_replacer(
-    [](std::string expr)->std::string
+    [](std::string expr) -> std::string
     {
-        if (auto py = pylang())
-        {
-            qstring errbuf;
-            idc_value_t rv;
-            if (py->eval_expr(&rv, BADADDR, expr.c_str(), &errbuf) && rv.vtype == VT_STR)
-                return rv.qstr().c_str();
-        }
-        return std::move(expr);
+        if (auto s = libidacpp::expr::eval_python_string(expr.c_str()))
+            return *s;
+        return std::move(expr);   // eval failed: leave the expression untouched
     }
 );
+
+//-------------------------------------------------------------------------
+// Rebuild the runtime replacer's pattern map from the current macro list.
+static void sync_replacer(macro_replacer_t &replacer, const std::vector<macro_def_t> &macros)
+{
+    replacer.begin_update();
+    for (const macro_def_t &m : macros)
+        replacer.update(m.macro, m.expr);
+    replacer.end_update();
+}
 
 //-------------------------------------------------------------------------
 // Macro Editor UI Implementation
@@ -164,7 +47,8 @@ const char *const macro_editor_t::header_[3] = { "Macro", "Expression", "Descrip
 
 //-------------------------------------------------------------------------
 macro_editor_t::macro_editor_t(const char *title_)
-    : chooser_t(flags_, qnumber(widths_), widths_, header_, title_)
+    : chooser_t(flags_, qnumber(widths_), widths_, header_, title_),
+      m_store(m_backend)
 {
 }
 
@@ -197,43 +81,16 @@ bool macro_editor_t::edit_macro_def(macro_def_t &def, bool as_new)
 }
 
 //-------------------------------------------------------------------------
-void macro_editor_t::reg_del_macro(const macro_def_t &macro)
-{
-    std::string ser;
-    macro.to_string(ser);
-    reg_update_strlist(IDAREG_CLI_MACROS, nullptr, MAX_CLI_MACROS, ser.c_str());
-}
-
-//-------------------------------------------------------------------------
-void macro_editor_t::reg_save_macro(const macro_def_t &macro, std::string *ser_out)
-{
-    std::string ser;
-    macro.to_string(ser);
-    reg_update_strlist(IDAREG_CLI_MACROS, ser.c_str(), MAX_CLI_MACROS);
-    if (ser_out != nullptr)
-        *ser_out = std::move(ser);
-}
-
-//-------------------------------------------------------------------------
-// Add a new macro
-macro_def_t *macro_editor_t::add_macro(macro_def_t macro)
-{
-    auto &new_macro = m_macros.push_back();
-    new_macro       = std::move(macro);
-    return &new_macro;
-}
-
-//-------------------------------------------------------------------------
 bool macro_editor_t::init()
 {
-    build_macros_list();
+    load();
     return true;
 }
 
 //-------------------------------------------------------------------------
 size_t idaapi macro_editor_t::get_count() const
 {
-    return m_macros.size();
+    return m_store.list().size();
 }
 
 //-------------------------------------------------------------------------
@@ -243,14 +100,14 @@ void idaapi macro_editor_t::get_row(
     chooser_item_attrs_t *attrs,
     size_t n) const
 {
-    auto &macro = m_macros[n];
+    const macro_def_t &macro = m_store.list()[n];
     cols->at(0) = macro.macro.c_str();
     cols->at(1) = macro.expr.c_str();
     cols->at(2) = macro.desc.c_str();
 }
 
 //-------------------------------------------------------------------------
-// Add a new script
+// Add a new macro
 chooser_t::cbret_t idaapi macro_editor_t::ins(ssize_t n)
 {
     macro_def_t new_macro;
@@ -259,26 +116,24 @@ chooser_t::cbret_t idaapi macro_editor_t::ins(ssize_t n)
         if (!edit_macro_def(new_macro, true))
             return cbret_t(n, chooser_base_t::NOTHING_CHANGED);
 
-        auto p = m_macros.find({ new_macro.macro });
-        if (p == m_macros.end())
+        if (m_store.add(new_macro))
             break;
 
         warning("A macro with the name '%s' already exists. Please choose another name!", new_macro.macro.c_str());
     }
 
-    reg_save_macro(*add_macro(std::move(new_macro)));
-
-    build_macros_list();
+    sync_replacer(macro_replacer, m_store.list());
     return cbret_t(0, chooser_base_t::ALL_CHANGED);
 }
 
 //-------------------------------------------------------------------------
-// Remove a script from the list
+// Remove a macro from the list
 chooser_t::cbret_t idaapi macro_editor_t::del(size_t n)
 {
-    reg_del_macro(m_macros[n]);
+    macro_def_t victim = m_store.list()[n];   // copy before the store mutates
+    m_store.remove(victim);
 
-    build_macros_list();
+    sync_replacer(macro_replacer, m_store.list());
     return adjust_last_item(n);
 }
 
@@ -286,91 +141,28 @@ chooser_t::cbret_t idaapi macro_editor_t::del(size_t n)
 // Edit the macro
 chooser_t::cbret_t idaapi macro_editor_t::edit(size_t n)
 {
-    // Take a copy of the old macro
-    auto old_macro = m_macros[n];
+    const macro_def_t old_macro = m_store.list()[n];   // copy
+    macro_def_t edited_macro = old_macro;
 
-    // Edit a copy of the macro
-    auto edited_macro = m_macros[n];
     while (true)
     {
         if (!edit_macro_def(edited_macro, false))
             return cbret_t(n, chooser_base_t::NOTHING_CHANGED);
 
-        // Check if macro name changed and if new name already exists
-        if (edited_macro.macro != old_macro.macro)
-        {
-            auto p = m_macros.find({ edited_macro.macro });
-            if (p != m_macros.end())
-            {
-                warning("A macro with the name '%s' already exists. Please choose another name!", edited_macro.macro.c_str());
-                continue;
-            }
-        }
-        break;
+        if (m_store.update(old_macro, edited_macro))
+            break;
+
+        warning("A macro with the name '%s' already exists. Please choose another name!", edited_macro.macro.c_str());
     }
 
-    // Delete the old macro
-    reg_del_macro(old_macro);
-
-    // Update the macro in-place and save
-    m_macros[n] = edited_macro;
-    reg_save_macro(m_macros[n]);
-
-    build_macros_list();
+    sync_replacer(macro_replacer, m_store.list());
     return cbret_t(n, chooser_base_t::ALL_CHANGED);
 }
 
 //-------------------------------------------------------------------------
-// Rebuilds the macros list
-void macro_editor_t::build_macros_list()
+// Load persisted macros (populate defaults on first run) and sync the replacer.
+void macro_editor_t::load()
 {
-    // Read all the serialized macro definitions
-    qstrvec_t ser_macros;
-    reg_read_strlist(&ser_macros, IDAREG_CLI_MACROS);
-    m_macros.qclear();
-
-    // Empty macros?
-    if (ser_macros.empty())
-    {
-        // If this is not the first run, then keep the macros list empty
-        qstring first_run;
-        first_run.sprnt("%s/firstrun.climacros", get_user_idadir());
-        if (!qfileexist(first_run.c_str()))
-        {
-            // Populate with the default macros (once)
-            FILE *fp = qfopen(first_run.c_str(), "w"); qfclose(fp);
-            for (auto &macro: DEFAULT_MACROS)
-            {
-                std::string ser_macro;
-                reg_save_macro(*add_macro(macro), &ser_macro);
-                ser_macros.push_back(ser_macro.c_str());
-            }
-        }
-    }
-    else
-    {
-        for (auto &ser_macro: ser_macros)
-        {
-            char *macro_str = ser_macro.extract();
-            char *sptr;
-            int icol = 0;
-            macro_def_t macro;
-            for (auto tok = qstrtok(macro_str, SER_SEPARATOR, &sptr);
-                 tok != nullptr;
-                 tok = qstrtok(nullptr, SER_SEPARATOR, &sptr), ++icol)
-            {
-                if (icol == 0)      macro.macro = tok;
-                else if (icol == 1) macro.expr  = tok;
-                else if (icol == 2) macro.desc  = tok;
-            }
-            add_macro(std::move(macro));
-            qfree(macro_str);
-        }
-    }
-
-    // Re-create the pattern replacement
-    macro_replacer.begin_update();
-    for (auto &m: m_macros)
-        macro_replacer.update(m.macro, m.expr);
-    macro_replacer.end_update();
+    m_store.load(DEFAULT_MACROS, qnumber(DEFAULT_MACROS));
+    sync_replacer(macro_replacer, m_store.list());
 }

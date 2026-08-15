@@ -1,8 +1,8 @@
 {
   "IDAMetadataDescriptorVersion": 1,
   "plugin": {
-    "name": "CLI Macros",
-    "version": "1.0.4",
+    "name": "climacros",
+    "version": "1.0.5",
     "entryPoint": "climacros",
     "description": "Productivity tool for defining and using static or dynamic macros in IDA's command line interfaces (IDC, Python, WinDbg, BochDbg, gdb, etc.).",
     "urls": {
@@ -17,12 +17,20 @@
     "categories": [
       "collaboration-and-productivity"
     ],
+    "keywords": [
+      "cli",
+      "macros",
+      "command-line",
+      "productivity",
+      "scripting"
+    ],
     "idaVersions": ">=9.0",
     "platforms": [
       "windows-x86_64",
       "linux-x86_64",
+      "macos-x86_64",
       "macos-aarch64"
     ],
-    "license": "MIT"
+    "license": "LicenseRef-Human-Origin-Source-1.0"
   }
 }

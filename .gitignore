@@ -5,4 +5,4 @@ Debug/
 x64/
 Release/
 BINARIES/
-.claude/settings.local.json
+.claude/
